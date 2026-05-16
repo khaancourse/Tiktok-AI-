@@ -166,8 +166,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "👋 *Salaan! Waxaan ahay TikTok Script Bot*\n\n"
         "📌 *Sida loo isticmaalo:*\n"
         "1️⃣ TikTok link i soo dir\n"
-        "2️⃣ Script English ah ayaan soo saari\n"
-        "3️⃣ Af Somali ayaan ku turjumi\n\n"
+        "2️⃣ Script English ah ayaan soo saari\n\n"
         "✅ *Tusaale:*\n`https://vm.tiktok.com/xxxxx`",
         parse_mode=constants.ParseMode.MARKDOWN
     )
@@ -198,18 +197,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         english = await loop.run_in_executor(None, get_captions, url)
         method  = "📝 Captions"
 
-        # Step 2: Haddaan captions jirin → Audio + Gemini
+        # Step 2: Haddaan captions jirin → Audio download + Gemini transcribe
         if not english:
             await proc.edit_text(
                 f"⏳ *Waan shaqeynayaa...*\n🎬 *{title[:55]}*\n"
-                f"⚠️ Captions lama helin\n🎤 Audio Gemini ku transcribing...",
+                f"⚠️ Captions lama helin\n🎤 Audio ka soo rarinayaa...",
                 parse_mode=constants.ParseMode.MARKDOWN
             )
             audio_path, tmpdir = await loop.run_in_executor(None, download_audio, url)
-            if audio_path:
+
+            if audio_path and os.path.exists(audio_path):
+                await proc.edit_text(
+                    f"⏳ *Waan shaqeynayaa...*\n🎬 *{title[:55]}*\n"
+                    f"🎤 Gemini audio transcribing...",
+                    parse_mode=constants.ParseMode.MARKDOWN
+                )
                 english = await loop.run_in_executor(None, gemini_transcribe, audio_path)
                 method  = "🎤 Gemini Audio"
-                # Cleanup
                 try:
                     import shutil; shutil.rmtree(tmpdir, ignore_errors=True)
                 except: pass
@@ -217,39 +221,36 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not english:
             await proc.edit_text(
                 "❌ *Script-ka lama helin*\n\n"
-                "• Video private yahay?\n• Captions la'aan?\n• Link-ka hubi",
+                "Sababaha:\n"
+                "• Video captions/subtitles kuma jiraan\n"
+                "• Audio-ga Gemini kama heli karin\n"
+                "• Filimka af kale ku hadlayaa (English ma aha)\n\n"
+                "Isku day video kale.",
                 parse_mode=constants.ParseMode.MARKDOWN
             )
             return
 
-        # Step 3: Translate
-        await proc.edit_text(
-            f"⏳ *Waan shaqeynayaa...*\n🎬 *{title[:55]}*\n"
-            f"✅ Script helay\n🌍 Af Somali turjumeynaa...",
-            parse_mode=constants.ParseMode.MARKDOWN
-        )
-        somali = await loop.run_in_executor(None, gemini_translate, english)
-
         await proc.delete()
 
-        # Send results
-        eng = english[:3800] + ("..." if len(english) > 3800 else "")
-        som = somali[:3800]  + ("..." if len(somali)  > 3800 else "")
+        # English script kaliya soo dir
+        eng = english[:4000] + ("..." if len(english) > 4000 else "")
 
         await update.message.reply_text(
-            f"✅ *Script Diyaar!* {method}\n🎬 *{title[:70]}*\n{'─'*26}\n\n"
-            f"🇺🇸 *Script English:*\n{eng}",
-            parse_mode=constants.ParseMode.MARKDOWN
-        )
-        await asyncio.sleep(0.5)
-        await update.message.reply_text(
-            f"🇸🇴 *Turjumaada Af Somali:*\n{'─'*26}\n\n{som}",
+            f"✅ *Script Diyaar!* {method}\n"
+            f"🎬 *{title[:70]}*\n"
+            f"{'─'*28}\n\n"
+            f"{eng}",
             parse_mode=constants.ParseMode.MARKDOWN
         )
 
     except Exception as e:
         logger.error(f"Error: {e}")
-        await proc.edit_text(f"❌ *Cilad:*\n`{str(e)[:300]}`", parse_mode=constants.ParseMode.MARKDOWN)
+        try:
+            await proc.edit_text(
+                f"❌ *Cilad dhacday*\n\n`{str(e)[:300]}`",
+                parse_mode=constants.ParseMode.MARKDOWN
+            )
+        except: pass
 
 # ══ MAIN ══
 
