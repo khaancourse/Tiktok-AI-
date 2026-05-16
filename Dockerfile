@@ -11,10 +11,12 @@ RUN apt-get update && \
 
 WORKDIR /app
 
+# MUHIIM: setuptools iyo wheel hore u install (pkg_resources fix)
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
 # Requirements copy & install
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Bot code copy
 COPY bot.py .
