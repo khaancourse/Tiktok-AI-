@@ -87,46 +87,55 @@ def clean_subtitle(content, ext):
     return ' '.join(out)
 
 def download_audio(url):
-    """Audio ka soo qaad (Gemini transcription u baahan)"""
+    """Audio ka soo qaad"""
     try:
         tmpdir = tempfile.mkdtemp()
-        out = os.path.join(tmpdir, 'audio.mp3')
+        out_template = os.path.join(tmpdir, 'audio.%(ext)s')
         ydl_opts = {
             'format': 'bestaudio/best',
-            'outtmpl': out,
-            'postprocessors': [{'key':'FFmpegExtractAudio','preferredcodec':'mp3','preferredquality':'64'}],
-            'quiet': True, 'no_warnings': True,
-            'max_filesize': 20 * 1024 * 1024,  # 20MB max
+            'outtmpl': out_template,
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '64',
+            }],
+            'quiet': True,
+            'no_warnings': True,
+            'max_filesize': 25 * 1024 * 1024,
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
-        # File raadi
+
+        # File-ka raadi
         for f in os.listdir(tmpdir):
-            if f.endswith(('.mp3','.m4a','.webm','.ogg')):
-                return os.path.join(tmpdir, f), tmpdir
+            full = os.path.join(tmpdir, f)
+            if os.path.isfile(full) and f.endswith(('.mp3', '.m4a', '.webm', '.ogg', '.wav')):
+                logger.info(f"Audio downloaded: {full} ({os.path.getsize(full)} bytes)")
+                return full, tmpdir
+
+        logger.error("Audio file not found after download")
+        return None, tmpdir
     except Exception as e:
         logger.error(f"Audio download error: {e}")
-    return None, None
+        return None, None
 
 def gemini_transcribe(audio_path):
-    """Gemini 1.5 Flash audio transcribe"""
+    """Gemini Files API ku transcribe audio"""
     try:
+        # Upload file to Gemini Files API
+        audio_file = genai.upload_file(path=audio_path, mime_type="audio/mp3")
+        logger.info(f"Uploaded to Gemini: {audio_file.name}")
+
         model = genai.GenerativeModel('gemini-2.0-flash')
-        with open(audio_path, 'rb') as f:
-            audio_data = f.read()
-        
-        import base64
-        audio_b64 = base64.b64encode(audio_data).decode()
-        
         response = model.generate_content([
-            {
-                "inline_data": {
-                    "mime_type": "audio/mp3",
-                    "data": audio_b64
-                }
-            },
-            "Transcribe this audio exactly as spoken in English. Return only the transcript text, no timestamps or labels."
+            audio_file,
+            "Transcribe this audio exactly as spoken. Return only the spoken text, no timestamps or labels."
         ])
+
+        # Cleanup uploaded file
+        try: genai.delete_file(audio_file.name)
+        except: pass
+
         return response.text.strip()
     except Exception as e:
         logger.error(f"Gemini transcribe error: {e}")
