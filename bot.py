@@ -111,7 +111,7 @@ def download_audio(url):
 def gemini_transcribe(audio_path):
     """Gemini 1.5 Flash audio transcribe"""
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-2.0-flash')
         with open(audio_path, 'rb') as f:
             audio_data = f.read()
         
@@ -135,7 +135,7 @@ def gemini_transcribe(audio_path):
 def gemini_translate(english_text):
     """Gemini → Af Somali turjum"""
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-2.0-flash')
         response = model.generate_content(
             f"""Turjum qoraalkan Af Somali ah. Xeerarka:
 1. Af Somali saafi ah — hadalka caadiga ah
