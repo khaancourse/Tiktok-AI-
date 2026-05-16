@@ -4,21 +4,41 @@ import asyncio
 import threading
 import tempfile
 import logging
+import shutil
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, constants
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import yt_dlp
 import google.generativeai as genai
+from transformers import pipeline
 
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
+# Configure logging
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Environment Variables
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 PORT           = int(os.environ.get("PORT", 8000))
 
-genai.configure(api_key=GEMINI_API_KEY)
+# Initialize Gemini
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+else:
+    logger.warning("⚠️ DIGNIIN: Gemini API Key lama helin!")
 
+# Initialize Whisper model
+logger.info("AI Model-ka Whisper ayaa la isku xirayaa...")
+try:
+    # Use a smaller model for efficiency if 'base' is too heavy for your server
+    # Options: "openai/whisper-tiny", "openai/whisper-small", "openai/whisper-base"
+    transcriber = pipeline("automatic-speech-recognition", model="openai/whisper-base")
+    logger.info("Whisper model successfully loaded.")
+except Exception as e:
+    logger.error(f"❌ Cilad ku timid isku xirka Whisper model: {e}")
+    transcriber = None # Set to None if it fails to load
+
+# Regex for TikTok URLs
 TIKTOK_RE = re.compile(
     r'(https?://)?(www\.)?(vm\.tiktok\.com|tiktok\.com|vt\.tiktok\.com)(/[^\s]+)',
     re.IGNORECASE
@@ -31,157 +51,121 @@ class HealthHandler(BaseHTTPRequestHandler):
         self.send_header('Content-Type', 'text/plain')
         self.end_headers()
         self.wfile.write(b'OK')
-    def log_message(self, *a): pass
+    def log_message(self, *a): pass # Suppress HTTP server logging
 
 def start_health_server():
     HTTPServer(('0.0.0.0', PORT), HealthHandler).serve_forever()
 
 # ══ HELPERS ══
 
-def is_tiktok(text):
+def is_tiktok_url(text):
     m = TIKTOK_RE.search(text)
     if not m: return None
     url = m.group(0)
     return url if url.startswith('http') else 'https://' + url
 
-def get_captions(url):
-    """TikTok captions/subtitles ka soo qaad"""
-    try:
-        with yt_dlp.YoutubeDL({'writesubtitles':True,'writeautomaticsub':True,
-                                'subtitleslangs':['en','en-US'],'skip_download':True,
-                                'quiet':True,'no_warnings':True}) as ydl:
-            info = ydl.extract_info(url, download=False)
-            all_subs = {**info.get('subtitles',{}), **info.get('automatic_captions',{})}
-            for lang in ['en','en-US','en-GB']:
-                if lang in all_subs:
-                    for fmt in all_subs[lang]:
-                        if fmt.get('ext') in ['vtt','json3','srv3']:
-                            import urllib.request
-                            with urllib.request.urlopen(fmt['url'], timeout=15) as r:
-                                content = r.read().decode('utf-8')
-                            text = clean_subtitle(content, fmt.get('ext',''))
-                            if text.strip():
-                                return text.strip()
-    except Exception as e:
-        logger.warning(f"Captions error: {e}")
-    return ""
-
-def clean_subtitle(content, ext):
-    import json
-    if ext == 'json3':
-        try:
-            data = json.loads(content)
-            parts = []
-            for ev in data.get('events',[]):
-                line = ''.join(s.get('utf8','') for s in ev.get('segs',[])).strip()
-                if line and line != '\n': parts.append(line)
-            return ' '.join(parts)
-        except: pass
-    lines, seen, out = content.split('\n'), set(), []
-    for l in lines:
-        l = l.strip()
-        if not l or l.startswith('WEBVTT') or re.match(r'\d+:\d+',l) or re.match(r'^\d+$',l): continue
-        clean = re.sub(r'<[^>]+>','',l).strip()
-        if clean and clean not in seen:
-            seen.add(clean); out.append(clean)
-    return ' '.join(out)
-
 def download_audio(url):
-    """Audio ka soo qaad"""
+    """Downloads audio from TikTok URL and returns path to the audio file and its temporary directory."""
+    tmpdir = tempfile.mkdtemp()
+    output_template = os.path.join(tmpdir, 'audio.%(ext)s')
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'outtmpl': output_template,
+        'quiet': True,
+        'no_warnings': True,
+        'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '128'}],
+        'max_filesize': 50 * 1024 * 1024,  # Max 50MB audio to prevent excessive processing
+    }
+
     try:
-        tmpdir = tempfile.mkdtemp()
-        out_template = os.path.join(tmpdir, 'audio.%(ext)s')
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': out_template,
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '64',
-            }],
-            'quiet': True,
-            'no_warnings': True,
-            'max_filesize': 25 * 1024 * 1024,
-        }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
-
-        # File-ka raadi
+        
+        # Find the downloaded file
         for f in os.listdir(tmpdir):
-            full = os.path.join(tmpdir, f)
-            if os.path.isfile(full) and f.endswith(('.mp3', '.m4a', '.webm', '.ogg', '.wav')):
-                logger.info(f"Audio downloaded: {full} ({os.path.getsize(full)} bytes)")
-                return full, tmpdir
-
-        logger.error("Audio file not found after download")
+            if f.startswith('audio.') and f.endswith(('.mp3', '.m4a', '.webm', '.ogg', '.wav')):
+                return os.path.join(tmpdir, f), tmpdir
+        logger.error(f"No audio file found in {tmpdir} after download.")
         return None, tmpdir
     except Exception as e:
-        logger.error(f"Audio download error: {e}")
-        return None, None
+        logger.error(f"Audio download error for {url}: {e}")
+        return None, tmpdir
 
-def gemini_transcribe(audio_path):
-    """Gemini Files API ku transcribe audio"""
+def transcribe_with_whisper(audio_path):
+    """Transcribes audio using the Hugging Face Whisper pipeline."""
+    if not transcriber:
+        return "❌ Cilad: Whisper model lama shaqeynayo."
     try:
-        # Upload file to Gemini Files API
-        audio_file = genai.upload_file(path=audio_path, mime_type="audio/mp3")
-        logger.info(f"Uploaded to Gemini: {audio_file.name}")
+        logger.info(f"Transcribing audio: {audio_path}")
+        # chunk_length_s helps process longer audios by breaking them into chunks
+        result = transcriber(audio_path, chunk_length_s=30, generate_kwargs={"task": "transcribe"})
+        return result['text'].strip()
+    except Exception as e:
+        logger.error(f"Whisper transcription error for {audio_path}: {e}")
+        return f"❌ Cillad AI-ga dhageysiga ah: {str(e)}"
 
-        model = genai.GenerativeModel('gemini-2.0-flash')
-        response = model.generate_content([
-            audio_file,
-            "Transcribe this audio exactly as spoken. Return only the spoken text, no timestamps or labels."
-        ])
+def translate_with_gemini(english_text):
+    """Translates English text to Somali using Gemini, with a custom prompt for storytelling and TTS readiness."""
+    if not GEMINI_API_KEY:
+        return "⚠️ Gemini API Key laguma xirin Settings-ka."
+    if not genai.is_initialized():
+        genai.configure(api_key=GEMINI_API_KEY) # Re-initialize if not
+    
+    try:
+        # Prioritize 'flash' models if available for speed
+        chosen_model_name = "gemini-1.5-flash" 
+        
+        gemini_model = genai.GenerativeModel(chosen_model_name)
+        
+        # CUSTOM PROMPT from your Gradio app
+        prompt = f"""
+        Doorkaaga: Waxaad tahay khabiir ku takhasusay turjumidda sheekooyinka iyo qoraallada TikTok (Professional Storyteller).
+        Hawskaada: U turjun qoraalkan hoos ku qoran Af-Soomaali aad u dabiici ah oo dadku fahmi karaan.
 
-        # Cleanup uploaded file
-        try: genai.delete_file(audio_file.name)
-        except: pass
-
+        Xeerarka aad raacayso:
+        1. QORAAL BINI-AADAM: Ha u turjumin kelmad-kelmad (literal translation). Ka dhig mid u qoran sidii qof bini-aadam ah oo sheeko xiiso leh u sheegaya saaxiibadiis. Isticmaal luuqad dadban oo soconaysa.
+        2. LAMBARADA U BEDDEL QORAAL: Tani waa mid aad muhiim u ah! Dhammaan lambarada, boqolleyda (%), iyo taariikhaha (dates) u qor sidii afka looga dhihi lahaa (Words). 
+           - Tusaale: Halkii aad qori lahayd "2024", qor "laba kun iyo labaatan iyo afar".
+           - Tusaale: Halkii aad qori lahayd "50%", qor "boqolkiiba konton".
+           - Tusaale: Halkii aad qori lahayd "10 people", qor "toban qof".
+        3. TTS READY: Qoraalka u diyaari qaab uu aqrin karo barnaamijka Text-to-Speech (Codka AI-ga). Ha isticmaalin calaamado adag.
+        
+        Halkan waa Script-ga:
+        \n\n{english_text}
+        """
+        
+        response = gemini_model.generate_content(prompt)
         return response.text.strip()
     except Exception as e:
-        logger.error(f"Gemini transcribe error: {e}")
-        return ""
+        logger.error(f"Gemini translation error: {e}")
+        return f"❌ Cillad dhinaca Gemini ah: {str(e)}"
 
-def gemini_translate(english_text):
-    """Gemini → Af Somali turjum"""
-    try:
-        model = genai.GenerativeModel('gemini-2.0-flash')
-        response = model.generate_content(
-            f"""Turjum qoraalkan Af Somali ah. Xeerarka:
-1. Af Somali saafi ah — hadalka caadiga ah
-2. TTS-friendly: jumladaha gaagaaban
-3. Macnaha asalka ah xafidh
-4. Qoraalka KALIYA soo celi
-
-English:
-{english_text}
-
-Af Somali:"""
-        )
-        return response.text.strip()
-    except Exception as e:
-        logger.error(f"Gemini translate error: {e}")
-        return f"❌ Turjumaada waa fashilantay: {e}"
-
-def get_title(url):
+def get_video_title(url):
+    """Gets the title of the video."""
     try:
         with yt_dlp.YoutubeDL({'quiet':True,'no_warnings':True}) as ydl:
-            return ydl.extract_info(url, download=False).get('title','TikTok Video')[:80]
-    except: return 'TikTok Video'
+            info = ydl.extract_info(url, download=False)
+            return info.get('title', 'TikTok Video')[:70] # Truncate title for display
+    except Exception as e:
+        logger.warning(f"Could not get video title for {url}: {e}")
+        return 'TikTok Video'
 
 # ══ TELEGRAM HANDLERS ══
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 *Salaan! Waxaan ahay TikTok Script Bot*\n\n"
+        "👋 *Salaan! Waxaan ahay TikTok Script & Somali AI Bot*\n\n"
         "📌 *Sida loo isticmaalo:*\n"
         "1️⃣ TikTok link i soo dir\n"
-        "2️⃣ Script English ah ayaan soo saari\n\n"
+        "2️⃣ Script English ah iyo turjumaad Af-Soomaali ah ayaan kuu soo saari\n\n"
         "✅ *Tusaale:*\n`https://vm.tiktok.com/xxxxx`",
         parse_mode=constants.ParseMode.MARKDOWN
     )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    url = is_tiktok(update.message.text or "")
+    user_message = update.message.text or ""
+    url = is_tiktok_url(user_message)
+
     if not url:
         await update.message.reply_text(
             "⚠️ TikTok link ma garanayo.\nTusaale: `https://vm.tiktok.com/xxxxx`",
@@ -189,93 +173,123 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    proc = await update.message.reply_text(
-        "⏳ *Waan shaqeynayaa...*\n📥 Captions raadineynaa...",
+    # Initial loading message
+    proc_message = await update.message.reply_text(
+        "⏳ *Waan shaqeynayaa...*\n🎬 Video title ayaan helayaa...",
         parse_mode=constants.ParseMode.MARKDOWN
     )
     loop = asyncio.get_event_loop()
+    tmpdir = None # Initialize tmpdir outside try block for cleanup
 
     try:
-        title = await loop.run_in_executor(None, get_title, url)
-        await proc.edit_text(
-            f"⏳ *Waan shaqeynayaa...*\n🎬 *{title[:55]}*\n📥 Captions raadineynaa...",
+        # Get video title
+        title = await loop.run_in_executor(None, get_video_title, url)
+        await proc_message.edit_text(
+            f"⏳ *Waan shaqeynayaa...*\n🎬 *{title}*\n"
+            "🎤 Codka ayaan soo dejinayaa...",
             parse_mode=constants.ParseMode.MARKDOWN
         )
+        logger.info(f"Processing URL: {url} - Title: {title}")
 
-        # Step 1: Captions
-        english = await loop.run_in_executor(None, get_captions, url)
-        method  = "📝 Captions"
+        # Download audio
+        audio_path, tmpdir = await loop.run_in_executor(None, download_audio, url)
 
-        # Step 2: Haddaan captions jirin → Audio download + Gemini transcribe
-        if not english:
-            await proc.edit_text(
-                f"⏳ *Waan shaqeynayaa...*\n🎬 *{title[:55]}*\n"
-                f"⚠️ Captions lama helin\n🎤 Audio ka soo rarinayaa...",
-                parse_mode=constants.ParseMode.MARKDOWN
-            )
-            audio_path, tmpdir = await loop.run_in_executor(None, download_audio, url)
-
-            if audio_path and os.path.exists(audio_path):
-                await proc.edit_text(
-                    f"⏳ *Waan shaqeynayaa...*\n🎬 *{title[:55]}*\n"
-                    f"🎤 Gemini audio transcribing...",
-                    parse_mode=constants.ParseMode.MARKDOWN
-                )
-                english = await loop.run_in_executor(None, gemini_transcribe, audio_path)
-                method  = "🎤 Gemini Audio"
-                try:
-                    import shutil; shutil.rmtree(tmpdir, ignore_errors=True)
-                except: pass
-
-        if not english:
-            await proc.edit_text(
-                "❌ *Script-ka lama helin*\n\n"
-                "Sababaha:\n"
-                "• Video captions/subtitles kuma jiraan\n"
-                "• Audio-ga Gemini kama heli karin\n"
-                "• Filimka af kale ku hadlayaa (English ma aha)\n\n"
-                "Isku day video kale.",
+        if not audio_path:
+            await proc_message.edit_text(
+                f"❌ *Cilad soo dejinta codka ah*\n\n"
+                f"Ma soo dejin karin codka: {title}.\n"
+                "Fadlan isku day video kale ama hubi link-ga.",
                 parse_mode=constants.ParseMode.MARKDOWN
             )
             return
 
-        await proc.delete()
-
-        # English script kaliya soo dir
-        eng = english[:4000] + ("..." if len(english) > 4000 else "")
-
-        await update.message.reply_text(
-            f"✅ *Script Diyaar!* {method}\n"
-            f"🎬 *{title[:70]}*\n"
-            f"{'─'*28}\n\n"
-            f"{eng}",
+        await proc_message.edit_text(
+            f"⏳ *Waan shaqeynayaa...*\n🎬 *{title}*\n"
+            "📝 Codka ayaan qoraal u beddelayaa (Whisper)...",
             parse_mode=constants.ParseMode.MARKDOWN
         )
+        logger.info(f"Audio downloaded to: {audio_path}. Starting Whisper transcription.")
 
-    except Exception as e:
-        logger.error(f"Error: {e}")
-        try:
-            await proc.edit_text(
-                f"❌ *Cilad dhacday*\n\n`{str(e)[:300]}`",
+        # Transcribe with Whisper
+        english_script = await loop.run_in_executor(None, transcribe_with_whisper, audio_path)
+
+        if english_script.startswith("❌"):
+            await proc_message.edit_text(
+                f"❌ *Cilad qoraal u beddelid ah*\n\n"
+                f"Whisper wuu ku guuldareystay: {title}\n"
+                f"Sabab: {english_script.replace('❌ Cilad AI-ga dhageysiga ah: ', '')}\n"
+                "Fadlan isku day video kale.",
                 parse_mode=constants.ParseMode.MARKDOWN
             )
-        except: pass
+            return
+        
+        await proc_message.edit_text(
+            f"⏳ *Waan shaqeynayaa...*\n🎬 *{title}*\n"
+            "🇸🇴 Qoraalka Af-Soomaali ayaan u turjumayaa (Gemini)...",
+            parse_mode=constants.ParseMode.MARKDOWN
+        )
+        logger.info("Whisper transcription successful. Starting Gemini translation.")
+
+        # Translate with Gemini
+        somali_script = await loop.run_in_executor(None, translate_with_gemini, english_script)
+
+        # Truncate long scripts for Telegram message limits (4096 chars)
+        eng_display = english_script[:3500] + ("\n\n...(Qoraalka oo dhan ma soo gelin karo sababtoo ah xaddidaadda Telegram)..." if len(english_script) > 3500 else "")
+        som_display = somali_script[:3500] + ("\n\n...(Qoraalka oo dhan ma soo gelin karo sababtoo ah xaddidaadda Telegram)..." if len(somali_script) > 3500 else "")
+
+        await proc_message.delete() # Delete the loading message
+
+        await update.message.reply_text(
+            f"✅ *Script Diyaar!* \n"
+            f"🎬 *{title}*\n"
+            f"{'─'*28}\n\n"
+            f"*🇺🇸 English Script:*\n`{eng_display}`\n\n"
+            f"*🇸🇴 Turjumaada Af-Soomaali:*\n`{som_display}`",
+            parse_mode=constants.ParseMode.MARKDOWN
+        )
+        logger.info(f"Successfully processed and sent script for {url}.")
+
+    except Exception as e:
+        logger.error(f"Error in handle_message for {url}: {e}", exc_info=True)
+        try:
+            await proc_message.edit_text(
+                f"❌ *Cilad lama filaan ah dhacday*\n\n`{str(e)[:300]}`\n"
+                "Fadlan isku day mar kale ama la xiriir maamulaha.",
+                parse_mode=constants.ParseMode.MARKDOWN
+            )
+        except Exception as edit_e:
+            logger.error(f"Failed to edit error message: {edit_e}")
+            await update.message.reply_text(
+                f"❌ *Cilad lama filaan ah dhacday*\n\n`{str(e)[:300]}`",
+                parse_mode=constants.ParseMode.MARKDOWN
+            )
+    finally:
+        # Clean up temporary audio files
+        if tmpdir and os.path.exists(tmpdir):
+            try:
+                shutil.rmtree(tmpdir)
+                logger.info(f"Temporary directory cleaned up: {tmpdir}")
+            except Exception as e:
+                logger.error(f"Failed to delete temporary directory {tmpdir}: {e}")
 
 # ══ MAIN ══
 
 def main():
-    if not TELEGRAM_TOKEN: raise ValueError("TELEGRAM_TOKEN ma jiro!")
-    if not GEMINI_API_KEY:  raise ValueError("GEMINI_API_KEY ma jiro!")
-
+    if not TELEGRAM_TOKEN:
+        logger.error("❌ TELEGRAM_TOKEN lama helin. Fadlan ku dar environment variables-ka.")
+        raise ValueError("TELEGRAM_TOKEN lama jiro!")
+    
+    # Start health check server in a separate thread
     threading.Thread(target=start_health_server, daemon=True).start()
-    logger.info(f"Health server: port {PORT}")
+    logger.info(f"Health check server started on port {PORT}")
 
+    # Build and run the Telegram bot application
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("help",  start))
+    app.add_handler(CommandHandler("help", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    logger.info("🤖 Bot started!")
+    logger.info("🤖 Telegram Bot started!")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
