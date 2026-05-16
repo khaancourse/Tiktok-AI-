@@ -1,6 +1,7 @@
-python-telegram-bot==20.X  # Use the latest stable version, e.g., 20.7
+python-telegram-bot==20.8  # Tani waa version deggan oo Python 3.9 la shaqeeya
+# Ama: python-telegram-bot==21.0.1 # Tani sidoo kale way la shaqeysaa Python 3.9
 yt-dlp
 google-generativeai
 transformers
-torch # Transformers needs a deep learning framework like PyTorch
-ffmpeg-python # yt-dlp might need this for post-processing
+torch
+ffmpeg-python
