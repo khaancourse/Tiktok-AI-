@@ -18,14 +18,14 @@ logger = logging.getLogger(__name__)
 
 # Environment Variables
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+# GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "") # Haddeysan la isticmaalayn translation, looma baahna
 PORT           = int(os.environ.get("PORT", 8000))
 
-# Initialize Gemini
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-else:
-    logger.warning("⚠️ DIGNIIN: Gemini API Key lama helin!")
+# Initialize Gemini (not needed for transcription in this version, only if you re-enable translation)
+# if GEMINI_API_KEY:
+#     genai.configure(api_key=GEMINI_API_KEY)
+# else:
+#     logger.warning("⚠️ DIGNIIN: Gemini API Key lama helin!")
 
 # Initialize Whisper model
 logger.info("AI Model-ka Whisper ayaa la isku xirayaa...")
@@ -104,41 +104,24 @@ def transcribe_with_whisper(audio_path):
         logger.error(f"Whisper transcription error for {audio_path}: {e}")
         return f"❌ Cillad AI-ga dhageysiga ah: {str(e)}"
 
-def translate_with_gemini(english_text):
-    """Translates English text to Somali using Gemini, with a custom prompt for storytelling and TTS readiness."""
-    if not GEMINI_API_KEY:
-        return "⚠️ Gemini API Key laguma xirin Settings-ka."
-    if not genai.is_initialized():
-        genai.configure(api_key=GEMINI_API_KEY) # Re-initialize if not
-    
-    try:
-        # Prioritize 'flash' models if available for speed
-        chosen_model_name = "gemini-1.5-flash" 
-        
-        gemini_model = genai.GenerativeModel(chosen_model_name)
-        
-        # CUSTOM PROMPT from your Gradio app
-        prompt = f"""
-        Doorkaaga: Waxaad tahay khabiir ku takhasusay turjumidda sheekooyinka iyo qoraallada TikTok (Professional Storyteller).
-        Hawskaada: U turjun qoraalkan hoos ku qoran Af-Soomaali aad u dabiici ah oo dadku fahmi karaan.
-
-        Xeerarka aad raacayso:
-        1. QORAAL BINI-AADAM: Ha u turjumin kelmad-kelmad (literal translation). Ka dhig mid u qoran sidii qof bini-aadam ah oo sheeko xiiso leh u sheegaya saaxiibadiis. Isticmaal luuqad dadban oo soconaysa.
-        2. LAMBARADA U BEDDEL QORAAL: Tani waa mid aad muhiim u ah! Dhammaan lambarada, boqolleyda (%), iyo taariikhaha (dates) u qor sidii afka looga dhihi lahaa (Words). 
-           - Tusaale: Halkii aad qori lahayd "2024", qor "laba kun iyo labaatan iyo afar".
-           - Tusaale: Halkii aad qori lahayd "50%", qor "boqolkiiba konton".
-           - Tusaale: Halkii aad qori lahayd "10 people", qor "toban qof".
-        3. TTS READY: Qoraalka u diyaari qaab uu aqrin karo barnaamijka Text-to-Speech (Codka AI-ga). Ha isticmaalin calaamado adag.
-        
-        Halkan waa Script-ga:
-        \n\n{english_text}
-        """
-        
-        response = gemini_model.generate_content(prompt)
-        return response.text.strip()
-    except Exception as e:
-        logger.error(f"Gemini translation error: {e}")
-        return f"❌ Cillad dhinaca Gemini ah: {str(e)}"
+# Function-ka Gemini translation-ka haddii la rabo in dib loo isticmaalo:
+# def translate_with_gemini(english_text):
+#     if not GEMINI_API_KEY:
+#         return "⚠️ Gemini API Key laguma xirin Settings-ka."
+#     if not genai.is_initialized():
+#         genai.configure(api_key=GEMINI_API_KEY)
+#     
+#     try:
+#         chosen_model_name = "gemini-1.5-flash" 
+#         gemini_model = genai.GenerativeModel(chosen_model_name)
+#         
+#         prompt = f"""... (your Somali translation prompt) ...\n\n{english_text}"""
+#         
+#         response = gemini_model.generate_content(prompt)
+#         return response.text.strip()
+#     except Exception as e:
+#         logger.error(f"Gemini translation error: {e}")
+#         return f"❌ Cillad dhinaca Gemini ah: {str(e)}"
 
 def get_video_title(url):
     """Gets the title of the video."""
@@ -154,10 +137,10 @@ def get_video_title(url):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 *Salaan! Waxaan ahay TikTok Script & Somali AI Bot*\n\n"
+        "👋 *Salaan! Waxaan ahay TikTok Script Bot*\n\n"
         "📌 *Sida loo isticmaalo:*\n"
         "1️⃣ TikTok link i soo dir\n"
-        "2️⃣ Script English ah iyo turjumaad Af-Soomaali ah ayaan kuu soo saari\n\n"
+        "2️⃣ Script English ah ayaan soo saari\n\n"
         "✅ *Tusaale:*\n`https://vm.tiktok.com/xxxxx`",
         parse_mode=constants.ParseMode.MARKDOWN
     )
@@ -210,7 +193,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         logger.info(f"Audio downloaded to: {audio_path}. Starting Whisper transcription.")
 
-        # Transcribe with Whisper
+        # Transcribe with Whisper (ONLY THIS STEP FOR ENGLISH)
         english_script = await loop.run_in_executor(None, transcribe_with_whisper, audio_path)
 
         if english_script.startswith("❌"):
@@ -223,19 +206,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         
-        await proc_message.edit_text(
-            f"⏳ *Waan shaqeynayaa...*\n🎬 *{title}*\n"
-            "🇸🇴 Qoraalka Af-Soomaali ayaan u turjumayaa (Gemini)...",
-            parse_mode=constants.ParseMode.MARKDOWN
-        )
-        logger.info("Whisper transcription successful. Starting Gemini translation.")
-
-        # Translate with Gemini
-        somali_script = await loop.run_in_executor(None, translate_with_gemini, english_script)
+        # HADDA LAGUMA BAANNA GEMINI TRANSLATION
+        # somali_script = await loop.run_in_executor(None, translate_with_gemini, english_script)
 
         # Truncate long scripts for Telegram message limits (4096 chars)
-        eng_display = english_script[:3500] + ("\n\n...(Qoraalka oo dhan ma soo gelin karo sababtoo ah xaddidaadda Telegram)..." if len(english_script) > 3500 else "")
-        som_display = somali_script[:3500] + ("\n\n...(Qoraalka oo dhan ma soo gelin karo sababtoo ah xaddidaadda Telegram)..." if len(somali_script) > 3500 else "")
+        eng_display = english_script[:4000] + ("\n\n...(Qoraalka oo dhan ma soo gelin karo sababtoo ah xaddidaadda Telegram)..." if len(english_script) > 4000 else "")
+        # som_display = somali_script[:3500] + ("\n\n...(Qoraalka oo dhan ma soo gelin karo sababtoo ah xaddidaadda Telegram)..." if len(somali_script) > 3500 else "")
 
         await proc_message.delete() # Delete the loading message
 
@@ -243,11 +219,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"✅ *Script Diyaar!* \n"
             f"🎬 *{title}*\n"
             f"{'─'*28}\n\n"
-            f"*🇺🇸 English Script:*\n`{eng_display}`\n\n"
-            f"*🇸🇴 Turjumaada Af-Soomaali:*\n`{som_display}`",
+            f"*🇺🇸 English Script:*\n`{eng_display}`", # Kaliya English ayaan soo bandhigay
             parse_mode=constants.ParseMode.MARKDOWN
         )
-        logger.info(f"Successfully processed and sent script for {url}.")
+        logger.info(f"Successfully processed and sent English script for {url}.")
 
     except Exception as e:
         logger.error(f"Error in handle_message for {url}: {e}", exc_info=True)
