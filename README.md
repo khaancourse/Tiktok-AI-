@@ -1,101 +1,39 @@
-# 🤖 TikTok Script Bot — Koyeb Deployment
+# 🎙️ TikTok Script & Somali AI Telegram Bot
 
----
+Bot-kan Telegram wuxuu u turjumaa fiidiyowyada TikTok qoraal (script) English ah oo uu isticmaalayo model-ka **Whisper** ee Hugging Face, ka dibna wuxuu qoraalkaas u turjumaa Af-Soomaali dabiici ah oo TTS (Text-to-Speech) friendly ah isagoo isticmaalaya **Google Gemini**.
 
-## 📋 Files-ka
+## 🌟 Tilmaamaha Muhiimka ah
 
-```
-tiktok-bot/
-├── bot.py           ← Main bot (health server ku jira)
-├── requirements.txt ← Python packages
-├── Dockerfile       ← Koyeb Docker image
-└── README.md        ← Tilmaamahan
-```
+*   **Soo Dejinta Fiiyowga TikTok:** Wuxuu isticmaalaa `yt-dlp` si uu u soo dejiyo qaybta codka ee fiidiyowga TikTok.
+*   **Qoraal u Beddelid English ah:** Wuxuu isticmaalaa model-ka Whisper (openai/whisper-base) si uu codka ugu beddelo qoraal (transcription) English ah.
+*   **Turjumid Af-Soomaali ah oo Dabiici ah:** Wuxuu isticmaalaa Google Gemini si uu qoraalka English-ka ah ugu turjumo Af-Soomaali. Gemini wuxuu adeegsadaa prompt gaar ah si uu turjumaadda uga dhigo mid u eeg sheeko bini-aadam ah, oo nambarada iyo boqolleyda u qoraa qaab afka lagu dhawaaqo, taasoo ka dhigaysa mid ku habboon TTS.
+*   **Feedback Dhameystiran:** Wuxuu siiyaa isticmaalaha fariimo macno leh inta uu shaqeynayo (soo dejin, transcribe-gareyn, turjumid) iyo haddii ay cilad dhacdo.
+*   **Diyaar u ah Deployment:** Wuxuu ku habboon yahay in lagu geeyo adeegyada Cloud-ka sida Koyeb, isagoo adeegsanaya `Dockerfile` iyo health check.
 
----
+## 🚀 Sida Loo Isticmaalo Bot-ka
 
-## 🚀 Tallaabada Koyeb
+1.  **Bilow Bot-ka:** Ka bilow bot-ka Telegram adigoo riixaya `/start`.
+2.  **Geli Link-ga TikTok:** U soo dir bot-ka link-ga fiidiyowga TikTok (tusaale: `https://vm.tiktok.com/xxxxx`).
+3.  **Sug:** Bot-ku wuxuu marka hore soo dejisan doonaa codka, ka dibna wuxuu u beddeli doonaa qoraal English ah oo uu isticmaalayo Whisper, ugu dambayntiina wuxuu u turjumi doonaa Af-Soomaali isagoo isticmaalaya Gemini.
+4.  **Hel Script-ka:** Waxaad heli doontaa script-ka English-ka ah iyo turjumaadda Af-Soomaaliga ah ee fiidiyowgaaga.
 
-### Tallaabo 1: Telegram Token hel
-1. Telegram: **@BotFather** → `/newbot`
-2. Magac: `KhaanFilms Script Bot`
-3. Username: `khaanfilms_script_bot` (ama mid kale)
-4. **Token-ka** koobiyee ✅
+## ⚙️ Sida Loo Geeyo (Deployment)
 
----
+Bot-kan waxaa loogu talagalay in lagu geeyo deegaanada Cloud-ka sida Koyeb.
 
-### Tallaabo 2: Gemini API Key hel
-1. Fur: **https://aistudio.google.com/app/apikey**
-2. Guji **"Create API Key"**
-3. **Key-ga** koobiyee ✅
+### 1. Shuruudaha
 
----
+*   **Telegram Bot Token:** Waxaad ka heli kartaa `@BotFather` ee Telegram.
+*   **Google Gemini API Key:** Abuur key ka Google AI Studio: [https://aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey).
+*   **Git Repository:** Code-kaaga waa inuu ku jiraa repository Git ah (GitHub, GitLab, iwm.).
 
-### Tallaabo 3: GitHub Repo samee
-1. **https://github.com** → New repository
-2. Magac: `tiktok-script-bot` (Public)
-3. Files 4-ta upload:
-   - `bot.py`
-   - `requirements.txt`
-   - `Dockerfile`
+### 2. Dejinta Faylasha Mashruuca
 
----
+Hubi in faylasha soo socda ay ku jiraan xididka (root) repositooriyadaada Git:
 
-### Tallaabo 4: Koyeb Deploy
+*   `telegram_tiktok_bot.py` (Main bot code)
+*   `requirements.txt` (Python dependencies)
+*   `Dockerfile` (Docker build instructions)
+*   `README.md` (Faylkan)
 
-1. **https://app.koyeb.com** → **"Create Service"**
-2. **"Web Service"** dooro
-3. **"GitHub"** dooro
-4. Repo-gaaga dooro: `tiktok-script-bot`
-
-**Settings:**
-| Field | Value |
-|-------|-------|
-| Service name | `tiktok-script-bot` |
-| Builder | `Dockerfile` |
-| Port | `8000` |
-| Instance | `Free` |
-
-5. **"Environment variables"** section:
-
-| Key | Value |
-|-----|-------|
-| `TELEGRAM_TOKEN` | *token-kaaga* |
-| `GEMINI_API_KEY` | *api key-gaaga* |
-
-6. Guji **"Deploy"** ✅
-
----
-
-## ✅ Test
-
-```
-Telegram → @your_bot → /start
-Markaas link dir:
-https://vm.tiktok.com/xxxxx
-```
-
----
-
-## ⚙️ Sida u shaqeyso
-
-```
-TikTok Link
-    ↓
-1. Captions (yt-dlp)
-    ↓ haddaan jirin
-2. Audio → Whisper AI
-    ↓
-3. Gemini → Af Somali
-    ↓
-Script English + Somali ✅
-```
-
----
-
-## 🔧 Koyeb Free Tier
-
-- ✅ **$5.75/bilood credit** bilaash
-- ✅ Always-on (spin down ma laha)
-- ✅ Docker support
-- ⚠️ RAM: 512MB (Whisper base model wuu shaqeeyaa)
+### 3. `requirements.txt`
