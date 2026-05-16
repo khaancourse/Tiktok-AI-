@@ -1,27 +1,34 @@
 FROM python:3.11-slim
 
-# Install ffmpeg (Whisper u baahan yahay)
+# System dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ffmpeg \
         git \
         curl \
+        build-essential \
+        python3-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# MUHIIM: setuptools iyo wheel hore u install (pkg_resources fix)
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+# Step 1: pip + setuptools + wheel upgrade
+RUN pip install --upgrade pip setuptools wheel
 
-# Requirements copy & install
+# Step 2: numpy hore u install (whisper u baahan yahay)
+RUN pip install "numpy<2.0"
+
+# Step 3: whisper gaar ahaan install (git source-ka toos ah)
+RUN pip install git+https://github.com/openai/whisper.git
+
+# Step 4: Remaining packages
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Bot code copy
 COPY bot.py .
 
-# Whisper model pre-download (build time-ka) — "base" model
+# Whisper model pre-download
 RUN python -c "import whisper; whisper.load_model('base')" || true
 
 CMD ["python", "bot.py"]
